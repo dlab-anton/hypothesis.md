@@ -56,6 +56,13 @@ Uvicorn and secrets from your host's secret store. Execute `alembic upgrade head
 as a deliberate deployment step with a database backup. Migration 017 stores
 durable retry receipts; deleting these records removes replay guarantees.
 
+In the hosted service, the exact root `https://hypothesis.md/` is a project-level
+307 redirect to `https://hypothesis-md.vercel.app/` with `Cache-Control: no-store`;
+the domain is not attached to the frontend project. The API remains a separate
+`hypothesisengine-api` deployment, so this redirect does not change `/api/v1` or
+the API documentation and does not require redeploying the API. Hypothesis has no
+standalone MCP endpoint; Motive's `/mcp` service is separate.
+
 `docker-compose.yml` is an optional local API/database setup and binds the API to
 loopback. It requires an explicit master key. Its database password defaults are
 local examples; configure independent credentials before broader use. Docker
