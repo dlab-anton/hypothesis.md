@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Docker
+docker-compose.override.yml
+
+# Claude Code
+.claude/
+
+# Vercel project links and downloaded environment files
+.vercel/
+.local/
+.deployment-private/
+.env*
+!.env.example
+node_modules*/
+.next/
+*.log
+*.db
+*.sqlite*
+*.pem
+*.key

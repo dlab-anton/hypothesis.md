@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png binary
+*.ico binary
+# Historical sender pins cover raw artifact bytes, including their line endings.
+hypothesis_engine_api/contracts/motive-writeback-1.8.0.json -text
+hypothesis_engine_api/contracts/motive-writeback-local-017.json -text
+hypothesis_engine_api/contracts/motive-writeback-channel-017.json -text

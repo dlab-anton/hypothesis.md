@@ -1,0 +1,44 @@
+[tool.poetry]
+name = "hypothesis-engine-api"
+version = "1.8.0"
+description = "Elegant API for tracking hypotheses through their full lifecycle"
+authors = ["HypothesisEngine"]
+readme = "README.md"
+package-mode = false
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = "0.136.3"
+starlette = "1.6.0"
+uvicorn = {extras = ["standard"], version = "^0.32.0"}
+gunicorn = "^23.0.0"
+sqlalchemy = {extras = ["asyncio"], version = "^2.0.36"}
+asyncpg = "^0.30.0"
+pydantic = "^2.10.0"
+pydantic-settings = "^2.6.0"
+alembic = "^1.14.0"
+psycopg2-binary = "^2.9.10"
+python-dotenv = "^1.0.1"
+structlog = "^24.4.0"
+httpx = "^0.28.0"
+slowapi = "^0.1.9"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "9.0.3"
+pytest-asyncio = "1.4.0"
+pytest-mock = "^3.14.0"
+ruff = "^0.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 88
+
+[tool.vercel]
+entrypoint = "app.main:app"

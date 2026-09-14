@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /hypothesis_engine_ui
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /hypothesis_engine_api
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

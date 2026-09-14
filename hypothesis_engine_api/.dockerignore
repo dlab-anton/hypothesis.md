@@ -1,0 +1,16 @@
+__pycache__
+*.pyc
+.env
+.env.local
+.pytest_cache
+.ruff_cache
+tests/
+
+.venv/
+venv/
+.local/
+.git/
+.env*
+*.dump
+*.backup
+.deployment-private/

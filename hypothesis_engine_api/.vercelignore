@@ -1,0 +1,23 @@
+.env
+.env.*
+**/.env
+**/.env.*
+.venv/
+venv/
+.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+tests/
+*.dump
+*.backup
+*.bak
+backups/
+.deployment-private/
+scripts/
+.agents/
+skills-lock.json
+# Vercel's uv builder cannot read the legacy Poetry-only manifest.
+# Use requirements.txt, pinned to the existing poetry.lock, instead.
+pyproject.toml
+poetry.lock
