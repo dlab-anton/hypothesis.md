@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   getHypothesis,
   listEvidence,
@@ -39,29 +39,67 @@ export function HypothesisDetail({ id, modal }: Props) {
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [lineage, setLineage] = useState<LineageResponse | null>(null);
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set(["evidence"]));
+  const [loadingTabs, setLoadingTabs] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tabError, setTabError] = useState<string | null>(null);
+  const [loadingMoreEvidence, setLoadingMoreEvidence] = useState(false);
+  const [evidenceLoadError, setEvidenceLoadError] = useState<string | null>(null);
+  const evidenceRequestId = useRef(0);
+  const evidenceLoadPending = useRef(false);
 
   useEffect(() => {
+    const requestId = ++evidenceRequestId.current;
+    evidenceLoadPending.current = false;
     async function load() {
       try {
         const [h, ev] = await Promise.all([getHypothesis(id), listEvidence(id)]);
+        if (requestId !== evidenceRequestId.current) return;
         setHypothesis(h);
         setEvidence(ev);
       } catch (e) {
+        if (requestId !== evidenceRequestId.current) return;
         setError(e instanceof Error ? e.message : "Failed to load hypothesis");
       } finally {
-        setLoading(false);
+        if (requestId === evidenceRequestId.current) setLoading(false);
       }
     }
     load();
   }, [id]);
 
+  const loadMoreEvidence = useCallback(async () => {
+    if (evidenceLoadPending.current) return;
+
+    evidenceLoadPending.current = true;
+    const requestId = ++evidenceRequestId.current;
+    const offset = evidence.length;
+    setLoadingMoreEvidence(true);
+    setEvidenceLoadError(null);
+
+    try {
+      const nextPage = await listEvidence(id, undefined, offset);
+      if (requestId !== evidenceRequestId.current) return;
+      setEvidence((current) => {
+        const existingIds = new Set(current.map((item) => item.id));
+        return [...current, ...nextPage.filter((item) => !existingIds.has(item.id))];
+      });
+    } catch (e) {
+      if (requestId === evidenceRequestId.current) {
+        setEvidenceLoadError(e instanceof Error ? e.message : "Failed to load more evidence");
+      }
+    } finally {
+      if (requestId === evidenceRequestId.current) {
+        evidenceLoadPending.current = false;
+        setLoadingMoreEvidence(false);
+      }
+    }
+  }, [evidence.length, id]);
+
   const handleTabChange = useCallback(
     (value: string) => {
       setTabError(null);
       if (value === "timeline" && !loadedTabs.has("timeline")) {
+        setLoadingTabs((prev) => new Set(prev).add("timeline"));
         getTimeline(id)
           .then((data) => {
             setTimeline(data);
@@ -69,9 +107,17 @@ export function HypothesisDetail({ id, modal }: Props) {
           })
           .catch((e) => {
             setTabError(e instanceof Error ? e.message : "Failed to load timeline");
+          })
+          .finally(() => {
+            setLoadingTabs((prev) => {
+              const next = new Set(prev);
+              next.delete("timeline");
+              return next;
+            });
           });
       }
       if (value === "lineage" && !loadedTabs.has("lineage")) {
+        setLoadingTabs((prev) => new Set(prev).add("lineage"));
         getLineage(id)
           .then((data) => {
             setLineage(data);
@@ -79,6 +125,13 @@ export function HypothesisDetail({ id, modal }: Props) {
           })
           .catch((e) => {
             setTabError(e instanceof Error ? e.message : "Failed to load lineage");
+          })
+          .finally(() => {
+            setLoadingTabs((prev) => {
+              const next = new Set(prev);
+              next.delete("lineage");
+              return next;
+            });
           });
       }
     },
@@ -88,13 +141,13 @@ export function HypothesisDetail({ id, modal }: Props) {
   if (loading) return <div className="text-muted-foreground">Loading...</div>;
   if (error) {
     return (
-      <div className="space-y-4 max-w-4xl">
+      <div className="mx-auto max-w-3xl space-y-4">
         {!modal && (
           <Button variant="link" asChild className="p-0 h-auto text-muted-foreground">
-            <Link href="/hypotheses">&larr; Back to hypotheses</Link>
+            <Link href="/board">&larr; Back to research</Link>
           </Button>
         )}
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+        <div className="border-y py-4 text-sm text-destructive">
           <p className="font-medium">Failed to load hypothesis</p>
           <p className="mt-1 text-xs opacity-80">{error}</p>
         </div>
@@ -102,33 +155,40 @@ export function HypothesisDetail({ id, modal }: Props) {
     );
   }
   if (!hypothesis) return <div className="text-destructive">Hypothesis not found</div>;
+  const totalEvidence = hypothesis.evidence_counts
+    ? hypothesis.evidence_counts.supporting +
+      hypothesis.evidence_counts.contradicting +
+      hypothesis.evidence_counts.neutral
+    : evidence.length;
 
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="mx-auto max-w-3xl space-y-7">
       {!modal && (
         <Button variant="link" asChild className="p-0 h-auto text-muted-foreground">
-          <Link href="/hypotheses">&larr; Back to hypotheses</Link>
+          <Link href="/board">&larr; Back to research</Link>
         </Button>
       )}
 
       {/* Header */}
-      <div className="space-y-2">
-        <div className="flex items-start justify-between gap-4">
-          <h1 className="text-xl font-bold leading-snug">{hypothesis.statement}</h1>
-          <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="space-y-3 border-b pb-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h1 className="min-w-0 flex-1 whitespace-pre-wrap break-words text-xl font-semibold leading-snug">
+            {hypothesis.statement}
+          </h1>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <OverdueBadge hypothesis={hypothesis} />
             <StatusBadge status={hypothesis.status} />
           </div>
         </div>
         {hypothesis.context && (
-          <p className="text-sm text-muted-foreground">{hypothesis.context}</p>
+          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-muted-foreground">{hypothesis.context}</p>
         )}
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {hypothesis.channel && <ChannelBadge channel={hypothesis.channel} />}
           <ConfidenceBar confidence={hypothesis.confidence} />
           <span className="text-xs text-muted-foreground">by {hypothesis.created_by}</span>
           <span className="text-xs text-muted-foreground">
-            {new Date(hypothesis.created_at).toLocaleDateString()}
+            Created {formatRelativeTime(hypothesis.created_at)}
           </span>
         </div>
         {(hypothesis.tags ?? []).length > 0 && (
@@ -145,7 +205,7 @@ export function HypothesisDetail({ id, modal }: Props) {
 
       {/* Evidence summary */}
       {hypothesis.evidence_counts && (
-        <div className="flex gap-4 text-sm">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
           <span className="text-green-600">{hypothesis.evidence_counts.supporting} supporting</span>
           <span className="text-red-600">{hypothesis.evidence_counts.contradicting} contradicting</span>
           <span className="text-muted-foreground">{hypothesis.evidence_counts.neutral} neutral</span>
@@ -157,7 +217,7 @@ export function HypothesisDetail({ id, modal }: Props) {
 
       {/* Tab error */}
       {tabError && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+        <div className="border-y py-4 text-sm text-destructive">
           <p className="font-medium">Failed to load tab data</p>
           <p className="mt-1 text-xs opacity-80">{tabError}</p>
         </div>
@@ -165,27 +225,32 @@ export function HypothesisDetail({ id, modal }: Props) {
 
       {/* Tabs */}
       <Tabs defaultValue="evidence" onValueChange={handleTabChange}>
-        <TabsList>
+        <TabsList className="h-auto rounded-none border-b bg-transparent p-0">
           <TabsTrigger value="evidence">Evidence</TabsTrigger>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
           <TabsTrigger value="lineage">Lineage</TabsTrigger>
         </TabsList>
 
         <TabsContent value="evidence">
-          <div className="space-y-2">
+          <div className="divide-y">
+            {totalEvidence > evidence.length ? (
+              <p className="py-3 text-xs text-muted-foreground">
+                Showing {evidence.length} of {totalEvidence} evidence records.
+              </p>
+            ) : null}
             {evidence.length === 0 ? (
               <p className="text-sm text-muted-foreground">No evidence yet.</p>
             ) : (
               evidence.map((ev) => {
                 const config = EVIDENCE_CONFIG[ev.evidence_type as EvidenceType] || EVIDENCE_CONFIG.neutral;
                 return (
-                  <div key={ev.id} className={`border-l-4 ${config.border} pl-3 py-2`}>
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm">{ev.content}</p>
+                  <div key={ev.id} className="py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm leading-relaxed">{ev.content}</p>
                       <Badge variant="outline" className={`text-xs ${config.color}`}>{config.label}</Badge>
                     </div>
-                    <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
-                      {ev.source && <span>Source: {ev.source}</span>}
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      {ev.source && <span className="break-all">Source: {ev.source}</span>}
                       {ev.strength !== null && <span>Strength: {ev.strength}</span>}
                       {ev.confidence_after != null && (
                         <span className="font-mono">Conf: {Math.round(ev.confidence_after * 100)}%</span>
@@ -197,12 +262,34 @@ export function HypothesisDetail({ id, modal }: Props) {
                 );
               })
             )}
+            {evidenceLoadError ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 py-4 text-sm text-destructive" role="alert">
+                <span>{evidenceLoadError}</span>
+                <Button size="sm" variant="outline" onClick={() => void loadMoreEvidence()}>
+                  Retry
+                </Button>
+              </div>
+            ) : null}
+            {evidence.length < totalEvidence && !evidenceLoadError ? (
+              <div className="py-4">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={loadingMoreEvidence}
+                  onClick={() => void loadMoreEvidence()}
+                >
+                  {loadingMoreEvidence ? "Loading…" : "Load more evidence"}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </TabsContent>
 
         <TabsContent value="timeline">
           <div className="space-y-2">
-            {timeline.length === 0 ? (
+            {loadingTabs.has("timeline") ? (
+              <p className="text-sm text-muted-foreground" role="status">Loading timeline…</p>
+            ) : timeline.length === 0 ? (
               <p className="text-sm text-muted-foreground">No events yet.</p>
             ) : (
               <div className="relative pl-4 border-l-2 border-muted space-y-4">
@@ -229,16 +316,16 @@ export function HypothesisDetail({ id, modal }: Props) {
 
         <TabsContent value="lineage">
           <div className="space-y-2">
-            {!lineage || lineage.chain.length <= 1 ? (
+            {loadingTabs.has("lineage") ? (
+              <p className="text-sm text-muted-foreground" role="status">Loading lineage…</p>
+            ) : !lineage || lineage.chain.length <= 1 ? (
               <p className="text-sm text-muted-foreground">No revision history.</p>
             ) : (
-              <div className="space-y-2">
+              <div className="divide-y">
                 {lineage.chain.map((h, i) => (
                   <div
                     key={h.id}
-                    className={`p-3 rounded-md border ${
-                      h.id === id ? "border-foreground bg-muted/50" : "border-muted"
-                    }`}
+                    className={`py-3 ${h.id === id ? "font-medium" : ""}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
@@ -246,7 +333,7 @@ export function HypothesisDetail({ id, modal }: Props) {
                         {h.id === id ? (
                           <span className="text-sm font-medium">{h.statement}</span>
                         ) : (
-                          <Link href={`/hypotheses/${h.id}`} className="text-sm font-medium text-blue-600 hover:underline">
+                          <Link href={`/hypotheses/${h.id}`} className="break-words text-sm font-medium underline-offset-4 hover:underline">
                             {h.statement}
                           </Link>
                         )}

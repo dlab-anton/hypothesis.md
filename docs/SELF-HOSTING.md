@@ -1,8 +1,8 @@
 # Self-hosting
 
 Use a dedicated PostgreSQL database, a server-only database login, and a randomly
-generated master key. Set `ENVIRONMENT=production`, configure exact dashboard
-origins in `CORS_ORIGINS`, terminate TLS at a trusted reverse proxy, and limit
+generated master key. Set `ENVIRONMENT=production`, configure exact origins in
+`CORS_ORIGINS` for any direct browser API clients, terminate TLS at a trusted reverse proxy, and limit
 network access to the database. Never expose a development server publicly.
 
 The API uses custom workspace API keys, not Supabase Auth. All workspace members
@@ -49,7 +49,9 @@ are outside this repository.
 
 ## Deployment and upgrades
 
-Build the frontend with its public API URL, then run `npm start`. Run the API with
+Build and run the frontend with server-side `HYPOTHESIS_API_URL` pointing to the
+HTTPS API base including `/api/v1`, then run `npm start`. Its same-origin proxy
+does not require a backend CORS change. Run the API with
 Uvicorn and secrets from your host's secret store. Execute `alembic upgrade head`
 as a deliberate deployment step with a database backup. Migration 017 stores
 durable retry receipts; deleting these records removes replay guarantees.

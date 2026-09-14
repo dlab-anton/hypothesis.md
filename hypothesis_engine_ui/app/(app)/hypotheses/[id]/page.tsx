@@ -7,5 +7,5 @@ export default function HypothesisDetailPage() {
   const params = useParams();
   const id = params.id as string;
 
-  return <HypothesisDetail id={id} />;
+  return <HypothesisDetail key={id} id={id} />;
 }

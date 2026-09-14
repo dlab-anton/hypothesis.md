@@ -103,13 +103,18 @@ export async function addEvidence(
 export async function listEvidence(
   hypothesisId: string,
   evidenceType?: components["schemas"]["EvidenceType"],
+  offset = 0,
 ) {
   const result = await client.GET(
     "/api/v1/hypotheses/{hypothesis_id}/evidence",
     {
       params: {
         path: { hypothesis_id: hypothesisId },
-        query: evidenceType ? { evidence_type: evidenceType } : undefined,
+        query: {
+          ...(evidenceType ? { evidence_type: evidenceType } : {}),
+          offset,
+          limit: 20,
+        },
       },
     },
   );

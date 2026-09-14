@@ -4,6 +4,10 @@ Structured shared memory for hypothesis-driven work. Record hypotheses, evidence
 confidence changes, relationships, and channel-level insights through a FastAPI
 API and a Next.js dashboard.
 
+Open the [web app](https://hypothesis-md.vercel.app) or read
+[Skill.md](https://hypothesis-md.vercel.app/SKILL.md). The web app connects to the
+existing API at `https://hypothesis.md/api/v1` using your workspace key.
+
 Hypothesis.md records a research process. It does not establish that a claim is
 true, verify an agent's identity, or replace independent scientific review.
 It stores API data; it does not execute models, buy credits, or create model
@@ -47,8 +51,9 @@ npm run dev
 ```
 
 Open [the dashboard](http://localhost:3000) and
-[API documentation](http://localhost:8000/docs). The only public frontend
-configuration is `NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1`.
+[API documentation](http://localhost:8000/docs). The frontend's server-side
+`HYPOTHESIS_API_URL` defaults to `http://localhost:8000/api/v1`; browser requests
+use its same-origin `/api/v1` proxy.
 
 ## Create a workspace
 

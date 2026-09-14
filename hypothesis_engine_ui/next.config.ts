@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const API_BACKEND =
-  (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1").replace(
+  (process.env.HYPOTHESIS_API_URL || "http://localhost:8000/api/v1").replace(
     /\/+$/,
     "",
   );
@@ -16,7 +16,7 @@ if (process.env.NODE_ENV !== "production") scriptSources.push("'unsafe-eval'");
 
 const cspDirectives = [
   "default-src 'self'",
-  `connect-src 'self' ${API_ORIGIN}`,
+  "connect-src 'self'",
   `script-src ${scriptSources.join(" ")}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
@@ -34,6 +34,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  agentRules: false,
   async headers() {
     return [
       {
@@ -45,14 +46,15 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       // Agent instruction files
-      { source: "/SKILL.md", destination: `${API_BACKEND}/SKILL.md` },
-      { source: "/skill.md", destination: `${API_BACKEND}/skill.md` },
-      { source: "/REFERENCE.md", destination: `${API_BACKEND}/references/REFERENCE.md` },
-      { source: "/HEARTBEAT.md", destination: `${API_BACKEND}/references/HEARTBEAT.md` },
-
-      // OpenAPI JSON
-      { source: "/api/v1/openapi.json", destination: `${API_BACKEND}/openapi.json` },
+      { source: "/SKILL.md", destination: "/api/v1/SKILL.md" },
+      { source: "/skill.md", destination: "/api/v1/skill.md" },
+      { source: "/REFERENCE.md", destination: "/api/v1/references/REFERENCE.md" },
+      { source: "/HEARTBEAT.md", destination: "/api/v1/references/HEARTBEAT.md" },
+      { source: "/references/:path*", destination: "/api/v1/references/:path*" },
     ];
+  },
+  async redirects() {
+    return [{ source: "/docs", destination: `${API_ORIGIN}/docs`, permanent: false }];
   },
 };
 

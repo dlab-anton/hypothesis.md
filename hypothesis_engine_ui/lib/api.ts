@@ -1,3 +1,4 @@
+import "client-only";
 import createClient, { type Middleware } from "openapi-fetch";
 import type { paths } from "@/types/api";
 import {
@@ -7,11 +8,7 @@ import {
 } from "./auth";
 
 /** Full API base including /api/v1 prefix (used for raw fetch in auth-guard). */
-export const API_BASE =
-  (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1").replace(
-    /\/+$/,
-    "",
-  );
+export const API_BASE = "/api/v1";
 
 // Generated paths include /api/v1 prefix, so client baseUrl is the server root
 const BASE_URL = API_BASE.replace(/\/api\/v1\/?$/, "");

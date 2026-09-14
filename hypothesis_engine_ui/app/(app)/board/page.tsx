@@ -1,321 +1,362 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import Link from "next/link";
-import { Check, X, Minus, Lightbulb } from "lucide-react";
-import type { Hypothesis, HypothesisStatus, Insight } from "@/types/hypothesis";
+import { useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { Hypothesis, Insight, InsightType, PaginatedResponse } from "@/types/hypothesis";
 import { listHypotheses, listInsights } from "@/lib/apiClient";
-import { STATUS_CONFIG } from "@/lib/constants";
 import { useChannel } from "@/components/channel-provider";
-import { ConfidenceBar } from "@/components/hypothesis/ConfidenceBar";
-import { ChannelBadge } from "@/components/hypothesis/ChannelBadge";
-import { OverdueBadge } from "@/components/hypothesis/OverdueBadge";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ResearchRow } from "@/components/research-row";
+import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  hypothesisListParams,
+  pageRange,
+  type ResearchStatusFilter,
+} from "@/lib/research-filter";
 
-const IN_PROGRESS: HypothesisStatus[] = ["draft", "active", "testing"];
-const CONCLUDED: HypothesisStatus[] = ["supported", "refuted", "inconclusive"];
+const HYPOTHESIS_PAGE_SIZE = 40;
+const INSIGHT_PAGE_SIZE = 12;
 
-const COLUMN_DOT: Record<string, string> = {
-  draft: "bg-gray-400",
-  active: "bg-blue-500",
-  testing: "bg-amber-500",
-};
+const STATUS_OPTIONS: Array<{ value: ResearchStatusFilter; label: string }> = [
+  { value: "all", label: "All statuses" },
+  { value: "draft", label: "Draft" },
+  { value: "active", label: "Active" },
+  { value: "testing", label: "Testing" },
+  { value: "supported", label: "Supported" },
+  { value: "refuted", label: "Refuted" },
+  { value: "inconclusive", label: "Inconclusive" },
+  { value: "revised", label: "Revised" },
+  { value: "archived", label: "Archived" },
+];
 
-const VERDICT_ICON: Record<string, { icon: typeof Check; color: string }> = {
-  supported: { icon: Check, color: "text-green-600" },
-  refuted: { icon: X, color: "text-red-600" },
-  inconclusive: { icon: Minus, color: "text-orange-500" },
-};
+const INSIGHT_TYPES: Array<{ value: "all" | InsightType; label: string }> = [
+  { value: "all", label: "All insight types" },
+  { value: "calibration", label: "Calibration" },
+  { value: "bias", label: "Bias" },
+  { value: "prior", label: "Prior" },
+  { value: "pattern", label: "Pattern" },
+];
 
-const INSIGHT_TYPE_COLOR: Record<string, string> = {
-  calibration: "text-sky-600",
-  bias: "text-rose-600",
-  prior: "text-amber-600",
-  pattern: "text-violet-600",
-};
+type PagePosition = { key: string; offset: number };
+type LoadedPage = { key: string; data: PaginatedResponse<Hypothesis> };
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export default function BoardPage() {
-  const [hypotheses, setHypotheses] = useState<Hypothesis[]>([]);
-  const [insights, setInsights] = useState<Insight[]>([]);
+  const { channel } = useChannel();
+  const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
+  const [status, setStatus] = useState<ResearchStatusFilter>("all");
+  const [position, setPosition] = useState<PagePosition>({ key: "", offset: 0 });
+  const [page, setPage] = useState<LoadedPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { channel: channelFilter } = useChannel();
-  const [agentFilter, setAgentFilter] = useState("all");
+  const [retry, setRetry] = useState(0);
+
+  const [insightType, setInsightType] = useState<"all" | InsightType>("all");
+  const [insights, setInsights] = useState<Insight[]>([]);
+  const [insightLoading, setInsightLoading] = useState(true);
+  const [insightError, setInsightError] = useState<string | null>(null);
+  const [insightHasMore, setInsightHasMore] = useState(false);
+  const [insightRetry, setInsightRetry] = useState(0);
+  const insightRequestId = useRef(0);
+
+  const requestKey = `${channel}\u0000${deferredSearch.trim()}\u0000${status}`;
+  const offset = position.key === requestKey ? position.offset : 0;
+  const visiblePage = page?.key === requestKey ? page.data : null;
+  const insightScope = `${channel}\u0000${insightType}`;
+  const insightScopeRef = useRef(insightScope);
+
+  useLayoutEffect(() => {
+    insightScopeRef.current = insightScope;
+  }, [insightScope]);
 
   useEffect(() => {
-    listHypotheses({ limit: 200 })
-      .then((res) => {
-        const items = Array.isArray(res?.items) ? res.items : [];
-        setHypotheses(items.filter((h) => h.status !== "revised"));
-        setLoading(false);
+    let current = true;
+
+    // Loading state describes an external request started by this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+    setError(null);
+    listHypotheses(
+      hypothesisListParams({
+        channel,
+        search: deferredSearch,
+        status,
+        offset,
+        limit: HYPOTHESIS_PAGE_SIZE,
+      }),
+    )
+      .then((data) => {
+        if (current) setPage({ key: requestKey, data });
       })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
+      .catch((reason) => {
+        if (current) setError(errorMessage(reason, "Research could not be loaded."));
+      })
+      .finally(() => {
+        if (current) setLoading(false);
       });
 
-    // Fetch insights independently — don't block the board if this fails
-    listInsights({ limit: 50 })
-      .then((res) => setInsights(Array.isArray(res) ? res : []))
-      .catch(() => {}); // silently ignore — insights column stays empty
-  }, []);
+    return () => {
+      current = false;
+    };
+  }, [channel, deferredSearch, offset, requestKey, retry, status]);
 
-  // Extract unique agents from all loaded data
-  const agents = useMemo(() => {
-    const set = new Set<string>();
-    hypotheses.forEach((h) => h.created_by && set.add(h.created_by));
-    insights.forEach((i) => i.created_by && set.add(i.created_by));
-    return [...set].sort();
-  }, [hypotheses, insights]);
+  useEffect(() => {
+    const requestId = ++insightRequestId.current;
 
-  // Apply filters
-  const filteredHypotheses = useMemo(() => {
-    return hypotheses.filter((h) => {
-      if (channelFilter && h.channel !== channelFilter) return false;
-      if (agentFilter !== "all" && h.created_by !== agentFilter) return false;
-      return true;
-    });
-  }, [hypotheses, channelFilter, agentFilter]);
+    // Loading state describes an external request started by this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setInsightLoading(true);
+    setInsightError(null);
+    listInsights({
+      ...(channel ? { channel } : {}),
+      ...(insightType === "all" ? {} : { type: insightType }),
+      offset: 0,
+      limit: INSIGHT_PAGE_SIZE + 1,
+    })
+      .then((items) => {
+        if (requestId !== insightRequestId.current || insightScope !== insightScopeRef.current) return;
+        setInsights(items.slice(0, INSIGHT_PAGE_SIZE));
+        setInsightHasMore(items.length > INSIGHT_PAGE_SIZE);
+      })
+      .catch((reason) => {
+        if (requestId === insightRequestId.current && insightScope === insightScopeRef.current) {
+          setInsightError(errorMessage(reason, "Insights could not be loaded."));
+        }
+      })
+      .finally(() => {
+        if (requestId === insightRequestId.current && insightScope === insightScopeRef.current) {
+          setInsightLoading(false);
+        }
+      });
+  }, [channel, insightRetry, insightScope, insightType]);
 
-  const filteredInsights = useMemo(() => {
-    return insights.filter((i) => {
-      if (channelFilter && i.channel !== channelFilter) return false;
-      if (agentFilter !== "all" && i.created_by !== agentFilter) return false;
-      return true;
-    });
-  }, [insights, channelFilter, agentFilter]);
+  async function loadMoreInsights() {
+    const requestId = ++insightRequestId.current;
+    const requestScope = insightScope;
+    setInsightLoading(true);
+    setInsightError(null);
 
-  const inProgressItems = IN_PROGRESS.reduce(
-    (acc, status) => {
-      acc[status] = filteredHypotheses.filter((h) => h.status === status && !h.is_archived);
-      return acc;
-    },
-    {} as Record<string, Hypothesis[]>,
-  );
-
-  const concluded = filteredHypotheses.filter(
-    (h) => CONCLUDED.includes(h.status) && !h.is_archived,
-  );
-
-  const archived = filteredHypotheses.filter((h) => h.is_archived);
-
-  const activeCount = filteredHypotheses.filter((h) => !h.is_archived).length;
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64 text-muted-foreground">
-        Loading board...
-      </div>
-    );
+    try {
+      const items = await listInsights({
+        ...(channel ? { channel } : {}),
+        ...(insightType === "all" ? {} : { type: insightType }),
+        offset: insights.length,
+        limit: INSIGHT_PAGE_SIZE + 1,
+      });
+      if (requestId !== insightRequestId.current || requestScope !== insightScopeRef.current) return;
+      setInsights((current) => [...current, ...items.slice(0, INSIGHT_PAGE_SIZE)]);
+      setInsightHasMore(items.length > INSIGHT_PAGE_SIZE);
+    } catch (reason) {
+      if (requestId === insightRequestId.current && requestScope === insightScopeRef.current) {
+        setInsightError(errorMessage(reason, "More insights could not be loaded."));
+      }
+    } finally {
+      if (requestId === insightRequestId.current && requestScope === insightScopeRef.current) {
+        setInsightLoading(false);
+      }
+    }
   }
 
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-64 text-destructive">
-        {error}
-      </div>
-    );
-  }
-
-  return (
-    <div className="h-full flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold">Board</h1>
-          <Select value={agentFilter} onValueChange={setAgentFilter}>
-            <SelectTrigger className="w-[150px] h-8 text-xs">
-              <SelectValue placeholder="All agents" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All agents</SelectItem>
-              {agents.map((ag) => (
-                <SelectItem key={ag} value={ag}>{ag}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <span className="text-sm text-muted-foreground">
-          {activeCount} active &middot; {archived.length} done
-        </span>
-      </div>
-
-      <div className="flex-1 flex gap-3 overflow-x-auto pb-4">
-        {/* In-progress columns */}
-        {IN_PROGRESS.map((status) => (
-          <BoardColumn key={status} status={status} items={inProgressItems[status] || []} />
-        ))}
-
-        {/* Concluded — single column with verdict icons */}
-        <BoardShell
-          dot={<span className="h-2.5 w-2.5 rounded-full bg-purple-500" />}
-          label="Concluded"
-          count={concluded.length}
-          empty="No hypotheses"
-        >
-          {concluded.map((h) => (
-            <KanbanCard key={h.id} hypothesis={h} showVerdict />
-          ))}
-        </BoardShell>
-
-        {/* Insights */}
-        <BoardShell
-          dot={<Lightbulb className="h-3.5 w-3.5 text-amber-500" />}
-          label="Insights"
-          count={filteredInsights.length}
-          empty="No insights yet"
-        >
-          {filteredInsights.map((ins) => (
-            <InsightCard key={ins.id} insight={ins} />
-          ))}
-        </BoardShell>
-
-        {/* Done */}
-        <BoardShell
-          dot={<span className="h-2.5 w-2.5 rounded-full bg-gray-400" />}
-          label="Done"
-          count={archived.length}
-          empty="No archived hypotheses"
-        >
-          {archived.map((h) => (
-            <KanbanCard key={h.id} hypothesis={h} showVerdict />
-          ))}
-        </BoardShell>
-      </div>
-    </div>
+  const range = visiblePage
+    ? pageRange(visiblePage.offset, visiblePage.items.length, visiblePage.total)
+    : { first: 0, last: 0 };
+  const hasPrevious = Boolean(visiblePage && visiblePage.offset > 0);
+  const hasNext = Boolean(
+    visiblePage && visiblePage.offset + visiblePage.items.length < visiblePage.total,
   );
-}
-
-function BoardShell({
-  dot,
-  label,
-  count,
-  empty,
-  children,
-}: {
-  dot: React.ReactNode;
-  label: string;
-  count: number;
-  empty: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex-shrink-0 w-64 flex flex-col rounded-xl border bg-muted/30">
-      <div className="flex items-center justify-between px-3 py-2.5 border-b">
-        <div className="flex items-center gap-2">
-          {dot}
-          <span className="text-sm font-medium">{label}</span>
-        </div>
-        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-mono">
-          {count}
-        </Badge>
-      </div>
-      <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
-        {count === 0 && (
-          <p className="text-xs text-muted-foreground text-center py-6">{empty}</p>
-        )}
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function BoardColumn({ status, items }: { status: HypothesisStatus; items: Hypothesis[] }) {
-  const config = STATUS_CONFIG[status];
-  return (
-    <BoardShell
-      dot={<span className={`h-2.5 w-2.5 rounded-full ${COLUMN_DOT[status] || "bg-gray-400"}`} />}
-      label={config.label}
-      count={items.length}
-      empty="No hypotheses"
-    >
-      {items.map((h) => (
-        <KanbanCard key={h.id} hypothesis={h} />
-      ))}
-    </BoardShell>
-  );
-}
-
-function KanbanCard({ hypothesis, showVerdict }: { hypothesis: Hypothesis; showVerdict?: boolean }) {
-  const ec = hypothesis.evidence_counts ?? { supporting: 0, contradicting: 0, neutral: 0 };
-  const total = ec.supporting + ec.contradicting + ec.neutral;
-  const verdict = VERDICT_ICON[hypothesis.status];
 
   return (
-    <Link href={`/hypotheses/${hypothesis.id}`}>
-      <Card className="hover:shadow-sm transition-shadow cursor-pointer p-0">
-        <CardContent className="p-3 space-y-2">
-          <div className="flex items-start justify-between gap-1">
-            <p className="text-xs font-medium leading-snug line-clamp-3">
-              {hypothesis.statement}
+    <div className="mx-auto w-full max-w-[1120px] space-y-10 pb-12">
+      <header className="space-y-2">
+        <h1 className="text-2xl font-semibold tracking-tight">Research</h1>
+        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          Browse the hypotheses, evidence, and retained insights available to this workspace.
+        </p>
+      </header>
+
+      <section aria-labelledby="hypotheses-heading">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 id="hypotheses-heading" className="text-base font-semibold">
+              Hypotheses
+            </h2>
+            <p className="text-xs text-muted-foreground">Newest updates first.</p>
+          </div>
+          {visiblePage ? (
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              {visiblePage.total === 0
+                ? "No results"
+                : `${range.first}–${range.last} of ${visiblePage.total}`}
             </p>
-            {showVerdict && verdict ? (
-              <verdict.icon className={`h-4 w-4 shrink-0 ${verdict.color}`} />
-            ) : (
-              <OverdueBadge hypothesis={hypothesis} />
-            )}
-          </div>
+          ) : null}
+        </div>
 
-          <ConfidenceBar confidence={hypothesis.confidence} />
-
-          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-            <span>{total} evidence</span>
-            <span>{hypothesis.created_by}</span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1">
-            {hypothesis.channel && (
-              <ChannelBadge channel={hypothesis.channel} />
-            )}
-            {(hypothesis.tags ?? []).slice(0, 2).map((tag) => (
-              <Badge
-                key={tag}
-                variant="secondary"
-                className="text-[10px] px-1.5 py-0"
-              >
-                {tag}
-              </Badge>
+        <div className="research-toolbar flex flex-col gap-2 border-y py-3 sm:flex-row">
+          <label className="sr-only" htmlFor="research-search">
+            Search hypotheses
+          </label>
+          <input
+            id="research-search"
+            className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            type="search"
+            placeholder="Search hypotheses"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <label className="sr-only" htmlFor="research-status">
+            Filter by status
+          </label>
+          <select
+            id="research-status"
+            className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={status}
+            onChange={(event) => setStatus(event.target.value as ResearchStatusFilter)}
+          >
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
             ))}
-            {(hypothesis.tags ?? []).length > 2 && (
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                +{(hypothesis.tags ?? []).length - 2}
-              </Badge>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
-  );
-}
+          </select>
+        </div>
 
-function InsightCard({ insight }: { insight: Insight }) {
-  const typeColor = INSIGHT_TYPE_COLOR[insight.insight_type] || "text-gray-600";
-  return (
-    <Link href={`/insights/${insight.id}`}>
-      <Card className="p-0 hover:shadow-sm transition-shadow cursor-pointer">
-        <CardContent className="p-3 space-y-1.5">
-          <div className="flex items-center gap-2">
-            <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${typeColor}`}>
-              {insight.insight_type}
-            </Badge>
-            <ChannelBadge channel={insight.channel} />
+        {error ? (
+          <div
+            className="research-empty flex items-center justify-between gap-4 border-b py-5 text-sm text-destructive"
+            role="alert"
+          >
+            <span>{error}</span>
+            <Button size="sm" variant="outline" onClick={() => setRetry((value) => value + 1)}>
+              Retry
+            </Button>
           </div>
-          <p className="text-xs leading-snug line-clamp-4">
-            {insight.content}
+        ) : null}
+        {loading && !visiblePage ? (
+          <p className="research-empty border-b py-8 text-sm text-muted-foreground" role="status">
+            Loading research…
           </p>
-          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-            <span>{insight.created_by}</span>
-            <span>{new Date(insight.created_at).toLocaleDateString()}</span>
+        ) : null}
+        {!loading && !error && visiblePage?.items.length === 0 ? (
+          <p className="research-empty border-b py-8 text-sm text-muted-foreground">
+            No hypotheses match these filters.
+          </p>
+        ) : null}
+        {visiblePage?.items.length ? (
+          <div className={`research-list divide-y ${loading ? "opacity-60" : ""}`} aria-busy={loading}>
+            {visiblePage.items.map((hypothesis) => (
+              <ResearchRow key={hypothesis.id} kind="hypothesis" item={hypothesis} />
+            ))}
           </div>
-        </CardContent>
-      </Card>
-    </Link>
+        ) : null}
+
+        {visiblePage && (hasPrevious || hasNext) ? (
+          <nav
+            className="research-pagination mt-4 flex items-center justify-between"
+            aria-label="Hypothesis pages"
+          >
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!hasPrevious || loading}
+              onClick={() =>
+                setPosition({
+                  key: requestKey,
+                  offset: Math.max(0, offset - HYPOTHESIS_PAGE_SIZE),
+                })
+              }
+            >
+              Previous
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              {range.first}–{range.last} of {visiblePage.total}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!hasNext || loading}
+              onClick={() =>
+                setPosition({ key: requestKey, offset: offset + HYPOTHESIS_PAGE_SIZE })
+              }
+            >
+              Next
+            </Button>
+          </nav>
+        ) : null}
+      </section>
+
+      <section className="border-t pt-8" aria-labelledby="insights-heading">
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 id="insights-heading" className="text-base font-semibold">
+              Insights
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Patterns and lessons retained across the research.
+            </p>
+          </div>
+          <label>
+            <span className="sr-only">Filter insights by type</span>
+            <select
+              className="h-8 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              value={insightType}
+              onChange={(event) => setInsightType(event.target.value as "all" | InsightType)}
+            >
+              {INSIGHT_TYPES.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {insightError ? (
+          <div
+            className="research-empty flex items-center justify-between gap-4 border-b py-5 text-sm text-destructive"
+            role="alert"
+          >
+            <span>{insightError}</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setInsightRetry((value) => value + 1)}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : null}
+        {insightLoading && insights.length === 0 ? (
+          <p className="research-empty border-b py-8 text-sm text-muted-foreground" role="status">
+            Loading insights…
+          </p>
+        ) : null}
+        {!insightLoading && !insightError && insights.length === 0 ? (
+          <p className="research-empty border-b py-8 text-sm text-muted-foreground">
+            No insights are available for this selection.
+          </p>
+        ) : null}
+        {insights.length ? (
+          <div className="research-list divide-y">
+            {insights.map((insight) => (
+              <ResearchRow key={insight.id} kind="insight" item={insight} />
+            ))}
+          </div>
+        ) : null}
+        {insightHasMore ? (
+          <div className="research-pagination pt-4">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={insightLoading}
+              onClick={() => void loadMoreInsights()}
+            >
+              {insightLoading ? "Loading…" : "Load more insights"}
+            </Button>
+          </div>
+        ) : null}
+      </section>
+    </div>
   );
 }
